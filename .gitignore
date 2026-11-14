@@ -1,0 +1,10 @@
+# build and test output
+*.o
+*.a
+*.exe
+*.dll
+*.raw
+out/
+build/
+__pycache__/
+*.pyc

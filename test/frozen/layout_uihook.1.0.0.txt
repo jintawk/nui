@@ -1,0 +1,51 @@
+# UiHook 2's frozen layout (src/UiHook/UiHook.h), checked by hook_matrix.exe against the host
+# and every test module it loads. ABI 2 forever: no existing line ever changes, except the reserved*
+# lines, which move and shrink when a revision appends a field into a reserved tail; such a revision
+# adds a line for its field. Offsets are bytes on 32-bit (i686).
+UIHOOK_ABI_VERSION 2
+UIHOOK_MAX_CLIENTS 32
+UIHOOK_MAP_BYTES 4096
+UIHOOK_MAP_NAME_FMT Local\FFXiUiHook_v2_%lu
+sizeof(UiClient) 64
+UiClient.occupied 0
+UiClient.enabled 4
+UiClient.draw 8
+UiClient.dispatch 12
+UiClient.user 16
+UiClient.rev 20
+UiClient.order 24
+UiClient.module 28
+UiClient.name 32
+UiClient.nonce_at 48
+UiClient.nonce 52
+UiClient.reserved 56
+sizeof(UiClient.name) 16
+sizeof(UiClient.reserved) 8
+UiBus.ready 0
+UiBus.abi_version 4
+UiBus.size 8
+UiBus.install_lock 12
+UiBus.hook_installed 16
+UiBus.owner_slot 20
+UiBus.in_flight 24
+UiBus.installs 28
+UiBus.dispatches 32
+UiBus.block 36
+UiBus.dispatch_ptr 40
+UiBus.site 44
+UiBus.owner_rev 48
+UiBus.reg_lock 52
+UiBus.handovers 56
+UiBus.reclaimed 60
+UiBus.blocked 64
+UiBus.foreign_site 68
+UiBus.lock_breaks 72
+UiBus.serial 76
+UiBus.reserved_hdr 80
+UiBus.clients 128
+UiBus.status 2176
+sizeof(UiBus.reserved_hdr) 48
+sizeof(UiBus.status) 192
+UIHOOK_LIVE 0
+UIHOOK_WAIT 1
+UIHOOK_BLOCKED 2

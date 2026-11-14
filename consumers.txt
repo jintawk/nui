@@ -1,0 +1,5 @@
+# Vendored copies of src, one per line, as paths relative to the directory sync.py is run from.
+# `python sync.py sync` writes them; `check` fails when one differs from the canonical source.
+# Example, for a Windower installation that holds two addons built on nui:
+#addons/chronicle/plugin/nui
+#addons/myaddon/plugin/nui
