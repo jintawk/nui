@@ -625,7 +625,7 @@ inline bool uihook_ensure_hook(UiBus* bus, bool simulate_missing = false, char c
             bus->foreign_site = other;
             InterlockedExchange(&bus->blocked, 1);
             std::snprintf(bus->status, sizeof(bus->status),
-                          "an older pre-release UiHook (ABI 1) holds the hook: rebuild nuiprobe / chronicle-v2");
+                          "an older pre-release UiHook (ABI 1) holds the hook: rebuild the other module");
             InterlockedExchange(&bus->install_lock, 0);
             return false;
         }
