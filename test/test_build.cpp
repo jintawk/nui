@@ -30,6 +30,7 @@
 
 #include "assets.hpp"
 #include "cache.hpp"
+#include "client.hpp"
 #include "ops.hpp"
 #include "textures.hpp"
 #include "ui.hpp"
@@ -893,6 +894,255 @@ void handles_checks() {
     if (ts.next != 7) fail("handles", "clear() restarted texture handles at " + std::to_string(ts.next) + " (old handles alias new pictures)");
 }
 
+// ---- 1.2.10: every texture format the game's own loader takes (ffxi-chronicle issue 10) --------
+// This install stores the window art and the gauge as DXT1 and the fonts as DXT3, and before 1.2.10
+// those two were all nui decoded. A client that keeps them in any of the other formats the game
+// itself takes (Render_CreateTextureFromDat, FFXiMain 0x10039e50: DXT1 to DXT5, or uncompressed at
+// 4, 8, 16, 24 or 32 bits) loaded none of them, so the module refused to start and drew nothing at
+// all. Here window type 6's art and a stand-in menu DAT are written in each of those formats and
+// read back: every piece must load and every pixel must come out as it went in.
+namespace fmt_fix {
+
+// 4 x 4 blocks of one of 16 colours, so one DXT block holds a block of the pattern exactly. The
+// channels are kept as their own 5 and 6 bit codes, so a colour survives DXT's 5-6-5 and
+// A1R5G5B5's 5-5-5 untouched and the expected image is the pattern itself: nothing is decoded twice.
+struct PatCol { int r5, g5, g6, b5; };
+PatCol pat_codes(int i) {
+    int const j = (i * 11 + 3) % 16, k = (i * 5 + 9) % 16;
+    return {i * 2, j * 2, j * 4, k * 2};
+}
+int pat_index(int x, int y) { return ((x / 4) * 7 + (y / 4) * 5) % 16; }
+std::uint32_t pat_color(int i, bool dxt) {
+    PatCol const c = pat_codes(i);
+    std::uint32_t const r = std::uint32_t(c.r5 * 255 / 31), b = std::uint32_t(c.b5 * 255 / 31);
+    std::uint32_t const g = dxt ? std::uint32_t(c.g6 * 255 / 63) : std::uint32_t(c.g5 * 255 / 31);
+    return 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+std::uint32_t pat(int x, int y, bool dxt) { return pat_color(pat_index(x, y), dxt); }
+
+// The bytes after the 44 byte texture header for a w x h image of the pattern. With a fourcc: the
+// 8 bytes nui skips, then one block per 4 x 4 cell, colour 0 holding that cell's colour and every
+// index 0 (DXT3 every alpha nibble opaque, DXT5 alpha 0 opaque and every index 0). Otherwise `bits`
+// is the depth, the palette comes first for 4 and 8, and the rows run bottom to top.
+std::vector<unsigned char> encode(int w, int h, unsigned bits, std::uint32_t fourcc) {
+    std::vector<unsigned char> d;
+    if (fourcc) {
+        d.assign(8, 0);
+        bool const a4 = fourcc == 0x44585432 || fourcc == 0x44585433;
+        bool const a8 = fourcc == 0x44585434 || fourcc == 0x44585435;
+        for (int by = 0; by < h / 4; ++by)
+            for (int bx = 0; bx < w / 4; ++bx) {
+                PatCol const c = pat_codes(pat_index(bx * 4, by * 4));
+                unsigned const v = unsigned(c.r5 << 11 | c.g6 << 5 | c.b5);
+                unsigned char blk[16] = {};
+                int n = 0;
+                if (a4) { for (int i = 0; i < 8; ++i) blk[i] = 0xFF; n = 8; }
+                else if (a8) { blk[0] = 0xFF; n = 8; }
+                blk[n] = static_cast<unsigned char>(v & 0xFF);
+                blk[n + 1] = static_cast<unsigned char>(v >> 8);
+                d.insert(d.end(), blk, blk + n + 8);
+            }
+        return d;
+    }
+    std::size_t const pal = bits == 4 ? 64 : bits == 8 ? 1024 : 0;
+    d.assign(pal + std::size_t(w) * std::size_t(h) * bits / 8, 0);
+    for (int i = 0; i < int(pal / 4); ++i) {
+        std::uint32_t const c = pat_color(i % 16, false);
+        d[std::size_t(i) * 4 + 0] = static_cast<unsigned char>(c & 0xFF);            // B
+        d[std::size_t(i) * 4 + 1] = static_cast<unsigned char>((c >> 8) & 0xFF);     // G
+        d[std::size_t(i) * 4 + 2] = static_cast<unsigned char>((c >> 16) & 0xFF);    // R
+        d[std::size_t(i) * 4 + 3] = 0x80;                                            // the client's opaque
+    }
+    unsigned char* p = d.data() + pal;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            std::size_t const q = std::size_t(h - 1 - y) * std::size_t(w) + std::size_t(x);
+            int const i = pat_index(x, y);
+            PatCol const c = pat_codes(i);
+            std::uint32_t const col = pat_color(i, false);
+            if (bits == 4) p[q / 2] = static_cast<unsigned char>(p[q / 2] | (i << ((q & 1) ? 0 : 4)));
+            else if (bits == 8) p[q] = static_cast<unsigned char>(i);
+            else if (bits == 16) {
+                unsigned const v = 0x8000u | unsigned(c.r5 << 10 | c.g5 << 5 | c.b5);
+                p[q * 2] = static_cast<unsigned char>(v & 0xFF);
+                p[q * 2 + 1] = static_cast<unsigned char>(v >> 8);
+            } else {
+                std::size_t const n = bits / 8;
+                p[q * n + 0] = static_cast<unsigned char>(col & 0xFF);
+                p[q * n + 1] = static_cast<unsigned char>((col >> 8) & 0xFF);
+                p[q * n + 2] = static_cast<unsigned char>((col >> 16) & 0xFF);
+                if (n == 4) p[q * n + 3] = 0x80;
+            }
+        }
+    return d;
+}
+
+void put32(std::vector<unsigned char>& v, std::size_t at, std::uint32_t x) { std::memcpy(&v[at], &x, 4); }
+
+// one 0x20 texture chunk: the 16 byte chunk header, a flag byte, the 16 byte name, the 44 byte
+// texture header (width at +4, height at +8, depth at +14, fourcc at +40), then the payload
+std::vector<unsigned char> tex_chunk(char const* name16, int w, int h, unsigned bits, std::uint32_t fourcc) {
+    std::vector<unsigned char> const payload = encode(w, h, bits, fourcc);
+    std::vector<unsigned char> c((77 + payload.size() + 15) / 16 * 16, 0);
+    put32(c, 4, 0x20u | (std::uint32_t(c.size() / 16) << 7));
+    c[16] = 0xA1;
+    std::memcpy(&c[17], name16, 16);
+    put32(c, 33 + 4, std::uint32_t(w));
+    put32(c, 33 + 8, std::uint32_t(h));
+    c[33 + 14] = static_cast<unsigned char>(bits & 0xFF);
+    c[33 + 15] = static_cast<unsigned char>(bits >> 8);
+    put32(c, 33 + 40, fourcc);
+    std::memcpy(&c[77], payload.data(), payload.size());
+    return c;
+}
+
+bool wmkdir(std::string const& p) {
+    return CreateDirectoryW(to_wide(p).c_str(), nullptr) != 0 || GetLastError() == ERROR_ALREADY_EXISTS;
+}
+bool wwrite(std::string const& p, std::vector<unsigned char> const& b) {
+    HANDLE const f = CreateFileW(to_wide(p).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD n = 0;
+    bool const ok = b.empty() || (WriteFile(f, b.data(), DWORD(b.size()), &n, nullptr) != 0 && n == b.size());
+    CloseHandle(f);
+    return ok;
+}
+
+// A fixture install under `inst` (ends with a backslash, may be UTF-8): VTABLE / FTABLE, window
+// type 6's DAT (the install's own win00 recipe behind the four re-encoded pieces) and a stand-in
+// menu DAT holding moji and the gauge. No FFXiMain.dll: the widths fall back, which is not what is
+// under test here.
+bool make_install(std::string const& inst, std::vector<unsigned char> const& win00, unsigned bits,
+                  std::uint32_t fourcc, bool with_window) {
+    if (!wmkdir(inst) || !wmkdir(inst + "ROM") || !wmkdir(inst + "ROM\\0") || !wmkdir(inst + "ROM\\119")) return false;
+    std::vector<unsigned char> vt(39543, 0), ft(79086, 0);
+    vt[19] = 1;
+    ft[38] = 19;                                        // ROM\0\19.DAT
+    vt[39542] = 1;
+    unsigned const e = (119u << 7) | 51u;               // ROM\119\51.DAT
+    ft[39542 * 2] = static_cast<unsigned char>(e & 0xFF);
+    ft[39542 * 2 + 1] = static_cast<unsigned char>(e >> 8);
+    if (!wwrite(inst + "VTABLE.DAT", vt) || !wwrite(inst + "FTABLE.DAT", ft)) return false;
+    if (with_window) {
+        std::vector<unsigned char> win;
+        for (char const* nm : {"menu    newtex  ", "menu    hfr1    ", "menu    vfr1    ", "menu    corner  "}) {
+            int const s = std::strstr(nm, "newtex") ? 128 : 32;
+            std::vector<unsigned char> const c = tex_chunk(nm, s, s, bits, fourcc);
+            win.insert(win.end(), c.begin(), c.end());
+        }
+        win.insert(win.end(), win00.begin(), win00.end());
+        if (!wwrite(inst + "ROM\\0\\19.DAT", win)) return false;
+    }
+    std::vector<unsigned char> menu = tex_chunk("font    moji    ", 1024, 32, bits, fourcc);
+    std::vector<unsigned char> const g = tex_chunk("menu    gauge   ", 64, 64, bits, fourcc);
+    menu.insert(menu.end(), g.begin(), g.end());
+    return wwrite(inst + "ROM\\119\\51.DAT", menu);
+}
+
+// the install's own 'menu    win00' chunk, so the recipe behind the fixture art is the real one
+std::vector<unsigned char> win00_chunk(std::string const& install) {
+    std::vector<unsigned char> const dat = file_bytes(dat_of(install, 19));
+    std::size_t off = 0;
+    while (off + 32 <= dat.size()) {
+        std::uint32_t info;
+        std::memcpy(&info, &dat[off + 4], 4);
+        std::size_t const len = ((info >> 7) & 0x7FFFF) * 16;
+        if (len < 16 || off + len > dat.size()) break;
+        if ((info & 0x7F) == 0x31 && std::memcmp(&dat[off + 16], "menu    win00   ", 16) == 0)
+            return std::vector<unsigned char>(dat.begin() + off, dat.begin() + off + len);
+        off += len;
+    }
+    return {};
+}
+
+int wrong(std::vector<std::uint32_t> const& atlas, int ax, int ay, int w, int h, bool dxt) {
+    if (atlas.size() < std::size_t(kAtlasW) * kAtlasH) return w * h;
+    int bad = 0;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            if (atlas[std::size_t(ay + y) * kAtlasW + ax + x] != pat(x, y, dxt)) ++bad;
+    return bad;
+}
+
+}  // namespace fmt_fix
+
+void format_checks(std::string const& install, std::string const& dir) {
+    using namespace fmt_fix;
+    std::vector<unsigned char> const win00 = win00_chunk(install);
+    if (win00.empty()) { fail("fmt", "cannot find the win00 recipe in window type 6's DAT"); return; }
+    struct Case { char const* name; unsigned bits; std::uint32_t fourcc; };
+    static Case const kCases[] = {
+        {"DXT1", 0, 0x44585431}, {"DXT2", 0, 0x44585432}, {"DXT3", 0, 0x44585433},
+        {"DXT4", 0, 0x44585434}, {"DXT5", 0, 0x44585435},
+        {"4 bit", 4, 0}, {"8 bit", 8, 0}, {"16 bit", 16, 0}, {"24 bit", 24, 0}, {"32 bit", 32, 0},
+    };
+    int n = 0;
+    for (Case const& c : kCases) {
+        std::string const inst = dir + "fmt" + std::to_string(n++) + "\\";
+        if (!make_install(inst, win00, c.bits, c.fourcc, true)) {
+            fail("fmt", std::string(c.name) + ": cannot write the fixture install");
+            continue;
+        }
+        Assets a;
+        bool const ok = a.load(inst, 6, 39542, true);
+        if (!ok || !a.have_window || !a.have_moji || !a.have_gauge) {
+            fail("fmt", std::string(c.name) + ": " + a.log);
+            continue;
+        }
+        bool const dxt = c.fourcc != 0;
+        int const bad = wrong(a.atlas, kBodyX, kBodyY, 128, 128, dxt) + wrong(a.atlas, kHfrX, kHfrY, 32, 32, dxt) +
+                        wrong(a.atlas, kVfrX, kVfrY, 32, 32, dxt) + wrong(a.atlas, kCornerX, kCornerY, 32, 32, dxt) +
+                        wrong(a.atlas, kGaugeX, kGaugeY, 64, 64, dxt) + wrong(a.atlas, kMojiX, kMojiY, 1024, 32, dxt);
+        if (bad) fail("fmt", std::string(c.name) + ": " + std::to_string(bad) + " pixels differ from the pattern written");
+    }
+    // Without the window art the module still loads, and the log says which file it could not read:
+    // a plain frame is drawn instead (ui.cpp), where before 1.2.10 nothing at all was.
+    std::string const bare = dir + "fmt_nowin\\";
+    if (!make_install(bare, win00, 32, 0, false)) {
+        fail("fmt", "cannot write the window-less fixture install");
+    } else {
+        Assets a;
+        bool const ok = a.load(bare, 6, 39542, true);
+        if (!ok || a.have_window)
+            fail("fmt", "without the window DAT: load " + std::to_string(int(ok)) + ", have_window " +
+                            std::to_string(int(a.have_window)));
+        else if (a.log.find("19.DAT") == std::string::npos || a.log.find(bare) == std::string::npos)
+            fail("fmt", "a missing window DAT is not named in the log: " + a.log);
+    }
+    // A header claiming a size the file cannot hold is refused, not decoded: 128 x 0x2000000 at
+    // 32 bits wraps a 32-bit byte count to 0, so without the size bound the check passes and the
+    // decode runs off the end of the DAT. make_install writes newtex first, so its texture header
+    // is at 0x21 and the height at 0x21 + 8.
+    std::string const bad = dir + "fmt_badsize\\";
+    if (!make_install(bad, win00, 32, 0, true)) {
+        fail("fmt", "cannot write the bad-size fixture install");
+    } else {
+        std::vector<unsigned char> dat = file_bytes(bad + "ROM\\0\\19.DAT");
+        if (dat.size() < 0x30) {
+            fail("fmt", "the bad-size fixture's window DAT is empty");
+        } else {
+            put32(dat, 0x21 + 8, 0x2000000u);
+            wwrite(bad + "ROM\\0\\19.DAT", dat);
+            Assets a;
+            a.load(bad, 6, 39542, true);
+            if (a.have_window || a.log.find("size 128x33554432") == std::string::npos)
+                fail("fmt", "a header claiming 128x33554432 was not refused by its size: " + a.log);
+        }
+    }
+    // A folder the system ANSI codepage cannot spell: every file nui opens is opened wide, so the
+    // install still reads. Before 1.2.10 each went through the ANSI CRT and read nothing at all.
+    std::string const wide = dir + "fmt-\xe3\x83\x86\xe3\x82\xb9\xe3\x83\x88-\xce\xa9\\";
+    if (!make_install(wide, win00, 32, 0, true)) {
+        fail("fmt", "cannot write a fixture install under a non-ANSI folder");
+        return;
+    }
+    Assets a;
+    if (!a.load(wide, 6, 39542, true) || !a.have_window || !a.have_moji || !a.have_gauge)
+        fail("fmt", "an install under a non-ANSI folder: " + a.log);
+    else if (wrong(a.atlas, kBodyX, kBodyY, 128, 128, false))
+        fail("fmt", "an install under a non-ANSI folder decoded differently");
+}
+
 void review_checks(std::string const& install) {
     std::string const dir = temp_dir();
     int const f0 = g_fail;
@@ -904,8 +1154,9 @@ void review_checks(std::string const& install) {
     clamp_checks();
     title_checks();
     recipe_checks(install, dir);
+    format_checks(install, dir);
     handles_checks();
-    std::printf("  review checks (decode sig pic read clamp title recipe assets handles): %d failed\n", g_fail - f0);
+    std::printf("  review checks (decode sig pic read clamp title recipe assets fmt handles): %d failed\n", g_fail - f0);
 }
 
 #endif

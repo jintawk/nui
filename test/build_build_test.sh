@@ -101,7 +101,8 @@ fi
 # 1.2.6: the code review's fixes in pure functions (test_build's review_checks)
 FAULTS="FAST_CLIPPED:quad PARSE_NO_TERM:parse MERGE_OVERLAP:merge MERGE_GREY:merge
 ERR_SUBSTR:decode NO_SIZE_CHECK:decode NO_SIGNATURE:sig SUM32:pic LUA_READS_ALL:read NO_CLAMP:clamp
-TITLE_NO_GUARD:title RECIPE_LAST:recipe NO_WIDTH_CACHE:assets HANDLES_RESTART:handles"
+TITLE_NO_GUARD:title RECIPE_LAST:recipe NO_WIDTH_CACHE:assets HANDLES_RESTART:handles
+DXT_ONLY:fmt ANSI_PATHS:fmt"
 echo "== build self-test: every fault variant must fail its check"
 caught=0; missed=0
 for ft in $FAULTS; do
