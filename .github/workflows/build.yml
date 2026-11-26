@@ -1,0 +1,30 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the 32-bit MinGW cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-i686
+
+      - name: Build the library and the demo module
+        run: NUI_GXX=i686-w64-mingw32-g++ sh example/build.sh
+
+      - name: Frozen shared-memory layouts
+        run: python3 test/frozen_check.py
+
+      - name: The frozen check still catches a fault
+        run: python3 test/frozen_check.py --self-test
