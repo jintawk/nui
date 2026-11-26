@@ -1,7 +1,7 @@
 # nui
 
 [![build](https://github.com/jintawk/nui/actions/workflows/build.yml/badge.svg)](https://github.com/jintawk/nui/actions/workflows/build.yml)
-[![release](https://img.shields.io/github/v/release/jintawk/nui)](https://github.com/jintawk/nui/releases/latest)
+[![tag](https://img.shields.io/github/v/tag/jintawk/nui)](https://github.com/jintawk/nui/tags)
 [![licence](https://img.shields.io/github/license/jintawk/nui)](LICENSE)
 
 A native user-interface library for Final Fantasy XI addons.
