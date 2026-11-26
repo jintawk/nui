@@ -60,6 +60,13 @@ single output byte of that kind's decode. Two library versions that would decode
 differently therefore never share a texture, and `test/golden_fmt.json` fails a build that changes
 the pixels without bumping the version.
 
+A change that lets a load succeed where it used to fail also alters the output, even when a stock
+install decodes exactly as before. The golden test sees only a stock install, so it cannot catch
+that, and the version has to be bumped by hand. Reading HD texture packs is such a change. nui 1.2.10
+cannot read their art, so the atlas moved to version 3 with it. Under one version, an addon on each
+library would share one atlas, and the one that created it would decide whether the other drew any
+window art.
+
 - Textures are created on the render thread, in the managed pool.
 - Holder bits track which modules still need an entry. An entry nobody holds survives ten seconds,
   so `//lua reload youraddon` finds its own atlas still there rather than decoding it again, and
