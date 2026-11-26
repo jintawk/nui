@@ -1,5 +1,9 @@
 # nui
 
+[![build](https://github.com/jintawk/nui/actions/workflows/build.yml/badge.svg)](https://github.com/jintawk/nui/actions/workflows/build.yml)
+[![release](https://img.shields.io/github/v/release/jintawk/nui)](https://github.com/jintawk/nui/releases/latest)
+[![licence](https://img.shields.io/github/license/jintawk/nui)](LICENSE)
+
 A native user-interface library for Final Fantasy XI addons.
 
 nui draws an addon's windows with Direct3D 8, on the game's own device, in the frame the game is
