@@ -42,6 +42,28 @@ The version string from your `HostConfig`.
 
 The coordinate space your Lua draws in. Pass the client's resolution for 1:1 pixels.
 
+Three spaces meet here, and only two of them are the same size:
+
+| Space | What it is |
+|---|---|
+| render px | the target nui draws into, which `auto` scales to by `render width / w` |
+| window px | the game window, `x_res` from `windower.get_windower_settings()` |
+| UI px | the UI drawn in that window, `ui_x_res`, the window over the launcher's UI Scale |
+
+`w` and `h` are window px, and one Lua unit is `f` of them.
+
+**Windower's `mouse` event reports UI px, not window px.** They are equal only at UI Scale 1.
+Converting a mouse event into Lua units is therefore
+
+```lua
+local uiscale = ws.x_res / ws.ui_x_res     -- 1 unless the player scaled the UI
+local lua_x = event_x * uiscale / f
+```
+
+Getting this wrong costs nothing on the machine you develop on and makes every click land
+short for anyone who scales their UI. It is the same space Windower's own `libs/texts.lua`
+uses, which anchors a right-aligned text at `ui_x_res`.
+
 ### `layer(id, z, text)` and `layer(id)`
 
 Set or remove one of 16 layers. `z` orders them back to front. `text` is the command string
