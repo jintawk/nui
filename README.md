@@ -530,8 +530,10 @@ checked on every call. CI runs it on every pull request. `sh test/build_pad_test
 builds Windows exes with stand-ins for the client, its shim and `xinput1_3.dll`. CI builds them,
 but they must run on Windows.
 
-The keyboard hook has a suite of its own. `sh test/build_key_test.sh --self-test` builds Windows exes
-with a stand-in client and a second module. CI builds them, but they must run on Windows.
+The keyboard hook has two as well. `sh test/key_linux/run.sh --self-test` runs the press rules. It
+also runs the client's real keyboard read bytes through the patch, and it checks the stack, the
+registers and the client's own flags on every call. `sh test/build_key_test.sh --self-test` builds Windows exes
+with a stand-in client and a second module. CI runs the first and builds the second.
 
 ## Licence
 
