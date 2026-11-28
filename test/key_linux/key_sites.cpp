@@ -178,11 +178,16 @@ unsigned char* in_state() { return g_input + 0x98; }
 KeyEvent* in_events() { return reinterpret_cast<KeyEvent*>(g_input + 0x79C); }
 DWORD in_count() { DWORD n; std::memcpy(&n, g_input + 0x8DC, 4); return n; }
 
-// what the stand-in records right after each site's cmp
+}  // namespace
+
+// what the stand-in records right after each site's cmp. Outside the anonymous namespace: the asm below names
+// these symbols, and inside it they have internal linkage, so a compiler may drop the ones only the asm uses.
 extern "C" {
-DWORD g_flags_a, g_eax_a, g_edi_a, g_flags_b, g_eax_b, g_ebx_b, g_ebp_b;
-DWORD g_sp, g_frame;                     // run_checked's own esp and frame, kept out of the stack under test
+__attribute__((used)) DWORD g_flags_a, g_eax_a, g_edi_a, g_flags_b, g_eax_b, g_ebx_b, g_ebp_b;
+__attribute__((used)) DWORD g_sp, g_frame;   // run_checked's own esp and frame, kept out of the stack under test
 }
+
+namespace {
 
 // Call the stand-in (cdecl, one argument) the way the client calls its update. *delta = esp after less esp before,
 // *regs = 1 when ebx, esi, edi and ebp came back.
