@@ -127,6 +127,83 @@ A fallback scanner for a future client where the config table has moved: ask the
 they are using, call `wtfind` with it, and `wtread` uses what it learns. Most addons never need
 these.
 
+## The controller
+
+nui can read the pad the game reads, and keep presses from the game while the addon uses them. It
+hooks the client's XInput read once per process, shared by every nui module (PadHook 1, see
+[abi.md](abi.md)). Since PadHook revision 3, the hook patches the client's own XInput wrapper in `FFXiMain.dll`.
+Where that wrapper is not found, it hot-patches `xinput1_3.dll!XInputGetState` instead. Only XInput is
+read in this version. With the client's **Enable XInput** setting off, the game uses DirectInput, and
+`pad()` never sees a pad.
+
+### `pad_start([flags]) -> ok, msg [, retry_ms]`
+
+Join the pad hook, and patch the client's XInput read if no module has. On the client's wrapper
+(revision 3), this succeeds before the client loads its XInput shim, and in DirectInput mode too.
+
+When the wrapper is not found, the hook tries `xinput1_3.dll!XInputGetState`. As with `start()`,
+`retry_ms` then means try again later (`xinput1_3.dll` is not loaded yet, or the wrapper can still
+work). No `retry_ms` means never in this process: the wrapper is refused for good, and the function
+is already hooked by another tool or is not hot-patchable. `msg` gives the reason for both routes. `flags` may contain `nosig`, which always takes both not-found paths (the
+fail-closed test).
+
+### `pad() -> seq, buttons, lt, rt, lx, ly, rx, ry, index, holding`
+
+What the game last read, raw (before any mask), from the user index that last read a connected pad.
+Returns numbers, not a table, so polling it every frame allocates nothing.
+
+| Value | What |
+|---|---|
+| `seq` | changes with every change of the rest; 0 = nothing read yet; -1 = the read was torn (try next frame) |
+| `buttons` | `XINPUT_GAMEPAD_*` bits; `0x10000` LT held, `0x20000` RT held |
+| `lt`, `rt` | 0 to 255 |
+| `lx`, `ly`, `rx`, `ry` | -32768 to 32767 |
+| `index` | the XInput user index, -1 when not connected |
+| `holding` | this module holds the pad |
+
+Each call is also the hold's heartbeat: poll it from `prerender`. On the client's wrapper, the first
+call that finds the client's shim loaded also pins `xinputdll.dll`, so the client can never unload it
+while a read is on its way through the hook.
+
+### `pad_capture(on)`
+
+Hold the pad (`true`) or give it back. While held, new presses, the sticks and the triggers are hidden
+from the game; see [abi.md](abi.md) for the exact rules on buttons held across the change. A hold
+lapses by itself 250 ms after the last `pad()`.
+
+### `pad_chord(buttons)` (revision 2)
+
+The buttons that, pressed together, take your pad: `0xC0` for L3 + R3. The hook keeps that chord from
+the game, even when the game maps those buttons itself. You still see it raw in `pad()`, and call
+`pad_capture(true)` yourself. A chord button pressed alone reaches the game up to 150 ms late, and
+a tap of one still reaches it. `0` turns the chord off.
+
+### `pad_config() -> {key, padmode, padsin}` or `nil, why`
+
+The game's own pad settings, read from the registry, as the client's config tool writes them:
+`padmode` is six comma-separated flags (the sixth is Enable XInput), `padsin` is 27 button ids, one per
+game action (5 Cancel, 6 Main menu, 7 Confirm, 8 Active window, ...).
+
+### `pad_status() -> table`
+
+`state` (`live`, `waiting`, `blocked`, `no bus`), `describe` (one line), `joined`, `holding`, `calls`,
+`clients`, `masked`, `hidden`, `lapses`, `reads`, `source`, `site`, `rev`, `owner_rev`.
+
+Since revision 3 it also has:
+
+| Field | What |
+|---|---|
+| `route` | `wrapper` (the client's XInput wrapper), `export` (`xinput1_3.dll!XInputGetState`), or `none` while nothing is patched |
+| `shim` | on `wrapper`: the client has loaded `xinputdll.dll` (it has not with Enable XInput off) |
+| `pinned` | on `wrapper`: this module has pinned `xinputdll.dll` |
+
+`site` is the patched address: the wrapper on `wrapper`, the function on `export`. `describe` names the
+route, for example `live at FFXiMain's XInput wrapper 10008EA0; 1 client: chronicle r3 (drives)`.
+
+### `pad_stop()`
+
+Give the pad back and leave the hook. `stop()` and unloading do this too.
+
 ## Diagnostics
 
 ### `status() -> table`
